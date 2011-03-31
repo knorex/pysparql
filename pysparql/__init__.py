@@ -9,7 +9,7 @@ __all__ = [
 import sys
 
 # generator expressions require 2.4
-assert sys.version_info >= (2, 4, 0), "yardflib requires Python 2.4 or higher"
+assert sys.version_info >= (2, 4, 0), "pysparql requires Python 2.4 or higher"
 del sys
 
 import logging

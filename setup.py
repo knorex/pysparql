@@ -2,16 +2,16 @@
 
 from distutils.core import setup
 
-# Install yardflib
-from yardflib import __version__
+# Install pysparql
+from pysparql import __version__
 
 
 setup(
-    name = 'yardflib',
+    name = 'pysparql',
     version = __version__,
-    description = "YaRDFLib - Yet another RDFLib is a Python version of RDF.rb library",
-    author = "Huy Phan",
-    author_email = "dachuy@gmail.com",
+    description = "SPARQL lexer and parser library for Python",
+    author = "Knorex",
+    author_email = "mail_us@knorex.com",
     maintainer = "Huy Phan",
     maintainer_email = "dachuy@gmail.com",
     url = "http://github.com/huyphan/yardflib",
@@ -28,6 +28,6 @@ setup(
     """,
     download_url = "",
 
-    packages = ['yardflib'],
+    packages = ['pysparql'],
 
     )
