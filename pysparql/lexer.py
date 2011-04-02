@@ -96,7 +96,7 @@ class Lexer:
 	NIL                  = re.compile("\(\x20|\x09|\x0D|\x0A*\)")
 	ANON                 = re.compile("\[\x20|\x09|\x0D|\x0A*\]")
 
-	KEYWORD              = re.compile("%s|%s" % ("|".join(KEYWORDS), "|".join(FUNCTIONS)))
+	KEYWORD              = re.compile("%s|%s" % ("|".join(KEYWORDS), "|".join(FUNCTIONS)), re.I)
 	DELIMITER            = re.compile("\^\^|[{}\(\)\[\],;\.]")
 	OPERATOR             = re.compile("a|\|\||&&|!=|<=|>=|[!=<>+\-*\/]")
 	

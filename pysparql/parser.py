@@ -141,7 +141,7 @@ class Parser(object):
 			self.debug("parse(pop)", "stack %s, depth %d" %(todo_stack[-1], len(todo_stack)))
 			todo_stack.pop()
 			self.on_finish()
-			
+
 	  # The last thing on the @prod_data stack is the result
 		if (type(self.prod_data[-1]) != dict):
 			self.result = self.prod_data[-1]
@@ -408,14 +408,14 @@ class Parser(object):
 			self.add_prod_data('query_list', rhs)
 		self.add_prod_datum('filter', data.get('filter'))
 
-	def handler_graphpatternnottriples_or_filter_finish(self, data):
+	def handler__graphpatternnottriples_or_filter_finish(self, data):
 		self.add_prod_datum('filter', data.get('filter'))
 		if data.get('query'):
 			res = data.get('query')[0]
 			if not isinstance(res, GroupQuery) or res.operation != 'union':
 				res = GroupQuery(res, 'join')
 			self.add_prod_data('_GraphPatternNotTriples_or_Filter', res)
-			
+
 	# [21]	  TriplesBlock ::= TriplesSameSubject ( '.' TriplesBlock? )?
 	def handler_triplesblock_finish(self, data):
 		query = Query()
@@ -745,7 +745,12 @@ class Parser(object):
 			data = {}
 			if context.get('start'):
 				context['start'](data)
+#			print "****"
+#			print prod
+#			print len(self.prod_data)
+#			print prod, data
 			self.prod_data.append(data)
+#			print len(self.prod_data)
 		else:
 			self.progress("%s(:start)" % prod, "")
 
@@ -753,7 +758,7 @@ class Parser(object):
 		prod = self.productions.pop()
 		context = self.contexts(prod)
 		if context: 
-			data = self.prod_data.pop()			
+			data = self.prod_data.pop()						
 			if context.get('finish'):
 				context['finish'](data)
 			self.progress("%s(:finish):%d" % (prod, len(self.prod_data[-1])), self.prod_data[-1], {'depth' : len(self.productions) +1 })
