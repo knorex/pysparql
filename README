@@ -1,0 +1,26 @@
+h1. PySPARQL README
+
+This is the Python version of "sparql-grammar":http://github.com/gkellogg/sparql-grammar library which was written originally in Ruby.
+
+h2. Dependencies
+
+* "Python":http://www.python.org/ >= 2.5
+* "YaRDFLib":http://github.com/knorex/yardflib
+
+h2. Examples
+
+<pre>
+<code>
+>>> from pysparql import Parser
+>>> query = "SELECT ?name WHERE { ?x rdf:type foaf:Person . ?x foaf:name ?name }"
+>>> p = Parser(query)
+>>> p.parse()
+>>> print p.result
+['project', [Variable(?name)], Query(None)[['triple', Variable(?x), URI(type), URI(Person)], ['triple', Variable(?x), URI(name), Variable(?name)]]]
+</code>
+<pre>
+
+
+h2. Author
+
+* "Knorex Pte. Ltd.":http://www.knorex.com
