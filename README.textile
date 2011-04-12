@@ -1,6 +1,6 @@
 h1. PySPARQL README
 
-This is the Python version of "sparql-grammar":http://github.com/gkellogg/sparql-grammar library which was written originally in Ruby.
+This is the Python version of "sparql-grammar":http://github.com/gkellogg/sparql-grammar library which was originally written in Ruby.
 
 h2. Dependencies
 
@@ -24,3 +24,7 @@ h2. Examples
 h2. Author
 
 * "Knorex Pte. Ltd.":http://www.knorex.com
+
+h2. License
+
+PySPARQL is freely available for all uses under a BSD license.
