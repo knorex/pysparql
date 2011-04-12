@@ -3,7 +3,8 @@ from meta import BRANCHES
 from extensions import GroupQuery
 from utils import flatten
 from yardflib.query import Variable, Pattern, Query
-from yardflib.model import URI
+from yardflib.model import URI, Literal
+from yardflib import vocab
 import sys
 
 class ParserError(Exception):
