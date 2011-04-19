@@ -4,7 +4,8 @@ from extensions import GroupQuery
 from utils import flatten
 from yardflib.query import Variable, Pattern, Query
 from yardflib.model import URI, Literal
-from yardflib import vocab
+from yardflib import vocab, literal
+import algebra
 import sys
 
 class ParserError(Exception):
@@ -20,7 +21,7 @@ class ParserError(Exception):
 		return repr(self._message)
 
 class Parser(object):
-	
+
 	START = "http://www.w3.org/2000/10/swap/grammar/sparql#Query"
 	GRAPH_OUTPUTS = ['query', 'distinct', 'filter', 'order', 'project', 'reduced', 'slice']
 
@@ -137,7 +138,7 @@ class Parser(object):
 				self.debug("parse(pop)", "stack %s, depth %d" %(todo_stack[-1], len(todo_stack)))
 				todo_stack.pop()
 				self.on_finish()
-
+				
 		while len(todo_stack) > 0:
 			self.debug("parse(pop)", "stack %s, depth %d" %(todo_stack[-1], len(todo_stack)))
 			todo_stack.pop()
@@ -156,49 +157,53 @@ class Parser(object):
 				
 	def add_prod_datum(self, sym, values):
 		if values == None: return
-
+		
 		if not self.prod_data[-1].get(sym):
 			self.prod_data[-1][sym] = []
-			
-		self.debug("add_prod_datum(%s)" % sym, "%s += %s" % (self.prod_data[-1][sym], values))
 
+		self.debug("add_prod_datum(%s)" % sym, "%s += %s" % (self.prod_data[-1][sym], values))
+		
 		if type(values) == list:
 			self.prod_data[-1][sym] += values
 		elif values != None:
 			self.prod_data[-1][sym].append(values)	
 
 	def add_prod_data(self, sym, *values):
-		
+
 		if len(filter(lambda x: x != None, values)) == 0:
 			return
+
 		if not self.prod_data[-1].get(sym):
 			self.prod_data[-1][sym] = []
 		self.prod_data[-1][sym] += values
 		self.debug("add_prod_datum(%s)" % sym, "%s += %s" % (self.prod_data[-1][sym], values))
+
+	def flatten_filter(self, data):
+		query = None
+		expr = None
+		if hasattr(data[-1], 'execute'):
+			query = data.pop(0)
+		if len(data) > 1:
+			expr = Exprlist(*data)
+		else:
+			expr = data[0]
+		return [expr, query]
 
 	# [1]	  Query						::=		  Prologue ( SelectQuery | ConstructQuery | DescribeQuery | AskQuery )
 	#
 	# Generate an S-Exp for the final query
 	# Inputs are :BaseDecl, :PrefixDecl, and :Query
 	def handler_query_finish(self, data):
-		for key in self.GRAPH_OUTPUTS:
-			if not data.get(key): continue
-			sxp = data[key]
-			sxp_1 = sxp[0]
-			break
+		
+		query = data.get('query')[0]
+		
+		if data.get('PrefixDecl'):
+			query = algebra.ExpressionFactory.factory('prefix', data.get('PrefixDecl')[0], query)
 
-		# Wrap in :base or :prefix or just use key
-		if data.get('PrefixDecl') and data.get('BaseDecl') and not options.get('expand_uris'):
-			self.add_prod_datum('base', *data['BaseDecl'])
-			self.add_prod_data('base', data['PrefixDecl'].insert(0, 'prefix') + [sxp_1])
-		elif data.get('PrefixDecl') and not options.get('expand_uris'):
-			self.add_prod_datum('prefix', data['PrefixDecl'])
-			self.add_prod_data('prefix', sxp_1)
-		elif data.get('BaseDecl') and not options.get('expand_uris'):
-			self.add_prod_datum('base', *data['BaseDecl'])
-			self.add_prod_data('base', sxp_1)
-		else:
-			self.add_prod_datum(key, sxp)
+		if data.get('BaseDecl'):
+			query = algebra.ExpressionFactory.factory('prefix', data.get('BaseDecl')[0], query)
+		
+		self.add_prod_datum('query', query)
 
 	# [2]	  Prologue					::=		  BaseDecl? PrefixDecl*
 	def handler_prologue_finish(self, data):
@@ -208,11 +213,9 @@ class Parser(object):
 
 	# [3]	  BaseDecl		::=		  'BASE' IRI_REF
 	def handler_basedecl_finish(self, data):
-		if options.get('resolve_uris'):
-			self.base_uri = self.uri(data['iri'][-1])
+		self.base_uri = self.uri(data['iri'][-1])
 		if not options.get('resolve_uris'):
 			self.add_prod_datum('BaseDecl', data['iri'][-1])
-
 
 	# [4] PrefixDecl := 'PREFIX' PNAME_NS IRI_REF";
 	def handler_prefixdecl_finish(self, data):
@@ -222,103 +225,47 @@ class Parser(object):
 
 	# [5]	  SelectQuery				::=		  'SELECT' ( 'DISTINCT' | 'REDUCED' )? ( Var+ | '*' ) DatasetClause* WhereClause SolutionModifier
 	def handler_selectquery_finish(self, data):
-		prod = None
-		for p in self.GRAPH_OUTPUTS:
-			if data.get(p):
-				prod = p
-				break
-		
-		res = None
-				
-		if prod:
-			res = data[prod]
-		
-		if data.get('Var'):
-			if res:
-				if prod == 'query':
-					res = res[0]
-				else:
-					res.insert(0, prod)
-			else:
-				res = Query()
-			
-			res = [data['Var']] + [res]
-			prod = 'project'
-
-		if data.get('DISTINCT_REDUCED'):
-			if res:
-				if prod == 'query':
-					res = res[0]
-				else:
-					res.insert(0, prod)
-			else:
-				res = Query()
-			res = [res]
-			prod = data['DISTINCT_REDUCED'][0]
-			
-		self.add_prod_datum(prod, res)
+		query = self.merge_modifiers(data)
+		self.add_prod_datum('query', query)
 		
 	# [6]	  ConstructQuery			::=		  'CONSTRUCT' ConstructTemplate DatasetClause* WhereClause SolutionModifier
 	def handler_constructquery_finish(self, data):
-		prod = None
-		for p in self.GRAPH_OUTPUTS:
-			if data.get(p):
-				prod = p
-				break
-				
-		if prod:
-			self.add_prod_datum(prod, data[prod])
-	
-	# [7]	  DescribeQuery				::=		  'DESCRIBE' ( VarOrIRIref+ | '*' ) DatasetClause* WhereClause? SolutionModifier	
-	def handler_describequery_finish(self, data):
-		prod = None
-		for p in self.GRAPH_OUTPUTS:
-			if data.get(p):
-				prod = p
-				break
-		
-		res = None
-		if prod:
-			res = data
-	
-		if data.get('Var'):
-			if res:
-				if prod == 'query':
-					res = res[0]
-				else:
-					res.insert(0, prod)
-			else:
-				res = rdf.Query()
-			
-			self.add_prod_data('project', data.get('Var'), res)
-		else:
-			self.add_prod_datum(prod, res)
-			
-	# [9]	  DatasetClause				::=		  'FROM' ( DefaultGraphClause | NamedGraphClause )		
-	def handler_datasetclause_finish(self, data):
-		prod = None
-		for p in self.GRAPH_OUTPUTS:
-			if data.get(p):
-				prod = p
-				break
-		self.add_prod_datum(prod, data.get(prod))
+		query = self.merge_modifiers(data)
+		template = data.get('ConstructTemplate')
+		if not template:
+			template = []
+		self.add_prod_datum('query', algebra.ExpressionFactory.factory('construct', template, query))
 
-	# [13]	  WhereClause				::=		  'WHERE'? GroupGraphPattern	
-	def handler_whereclause_finish(self, data):
-		prod = None
-		for p in self.GRAPH_OUTPUTS:
-			if data.get(p):
-				prod = p
-				break
-		self.add_prod_datum(prod, data.get(prod))
-				
+	# [7]	  DescribeQuery				::=		  'DESCRIBE' ( VarOrIRIref+ | '*' ) DatasetClause* WhereClause? SolutionModifier	
+	def handler_describequery_finish(self, data):		
+		query = self.merge_modifiers(data)
+		to_describe = data.get('VarOrIRIref')
+		if not to_describe:
+			to_describe = []
+		query = algebra.ExpressionFactory.factory('describe', to_describe, query)
+		self.add_prod_datum('query', query)
+		
+	# [8]     AskQuery                  ::=       'ASK' DatasetClause* WhereClause
+	def handler_askquery_finish(self, data):
+		query = self.merge_modifiers(data)
+		self.add_prod_datum('query', algebra.ExpressionFactory.factory('ask', query))
+
+	# [10]    DefaultGraphClause        ::=       SourceSelector
+	def handler_defaultgraphclause_finish(self, data):
+		self.add_prod_datum('dataset', data.get('IRIref'))
+
+    # [11]    NamedGraphClause          ::=       'NAMED' SourceSelector
+	def handler_namedgraphclause_finish(self, data):
+		data.get('IRIref').insert(0, 'named')
+		self.add_prod_data('dataset', data.get('IRIref'))
+					
 	# [14]	  SolutionModifier			::=		  OrderClause? LimitOffsetClauses?			
 	def handler_solutionmodifier_finish(self, data):
 		self.add_prod_datum('order', data.get('order'))
 		self.add_prod_datum('slice', data.get('slice'))
 	
 	# [15]	  LimitOffsetClauses		::=		  ( LimitClause OffsetClause? | OffsetClause LimitClause? )
-	def handler_limitoffsetclauses(self, data):
+	def handler_limitoffsetclauses_finish(self, data):
 		if data.get('limit') or data.get('offset'):
 			if data.get('limit'):
 				limit = data['limit'][-1]
@@ -349,7 +296,7 @@ class Parser(object):
 			
 	# [18]	  LimitClause				::=		  'LIMIT' INTEGER
 	def handler_limitclause_finish(self, data):
-		self.add_prod_datum('offset', data.get('literal'))
+		self.add_prod_datum('limit', data.get('literal'))
 		
 	# [19]	  OffsetClause				::=		  'OFFSET' INTEGER
 	def handler_offsetclause_finish(self, data):
@@ -363,48 +310,48 @@ class Parser(object):
 			lhs = None
 			if data.get('query'):
 				lhs = data.get('query')[0]
-
+			
 			while (len(query_list) > 0):
 				rhs = query_list.pop(0)
-
-				if not isinstance(rhs, GroupQuery):
-					rhs = GroupQuery([rhs], 'join')
-
-				if rhs.operation == 'leftjoin':
+				if not isinstance(rhs, algebra.Operator):
+					rhs = algebra.ExpressionFactory.factory('join', 'placeholder', rhs)
+				
+				if isinstance(rhs, algebra.LeftJoin):
 					lhs = lhs or Query()
 				
 				if lhs:
-					rhs.insert(0, lhs)
+					if rhs.operands[0] == 'placeholder':
+						rhs.operands[0] = lhs
+					else:
+						rhs = algebra.Join(lhs, rhs)
 					
 				lhs = rhs
 				
-				if isinstance(lhs, GroupQuery) and (len(lhs) == 1):
-					lhs = lhs.queries[0]
-			
-			if isinstance(lhs, GroupQuery) and (len(lhs) == 0) and (lhs.operation != 'leftjoin'):
-				lhs = None
+				if lhs.operands[0] == 'placeholder':
+					lhs = lhs.operands[1]
 				
+			if isinstance(lhs, algebra.Join) or isinstance(lhs, algebra.Union):
+				if lhs.operands[0] == 'placeholder':
+					lhs = lhs.operands[1]
 			res = lhs
-
 		elif data.get('query'):
 			res = data.get('query')[0]
-		else:
-			return None
 
 		if data.get('filter'):
-			res = data.get('filter') + [res]
-			prod = 'filter'
-		else:
-			prod = 'query'
-		self.add_prod_datum(prod, res)
+			expr, query = self.flatten_filter(data.get('filter'))
+			query = res or Query()
+			res = algebra.Filter(expr, query)
+			
+		self.add_prod_datum('query', res)
+				
 		
 	def handler__graphpatternnottriples_or_filter_dot_opt_triplesblock_opt_finish(self, data):
 		lhs = data.get('_GraphPatternNotTriples_or_Filter')
 		rhs = data.get('query')
 		if lhs:
 			self.add_prod_datum('query_list', lhs)
-		if rhs and not isinstance(rhs, GroupQuery):
-			rhs = GroupQuery(rhs, 'join')	
+		if rhs:
+			rhs = algebra.ExpressionFactory.factory('join', 'placeholder', rhs[0])
 		if rhs:
 			self.add_prod_data('query_list', rhs)
 		self.add_prod_datum('filter', data.get('filter'))
@@ -413,8 +360,8 @@ class Parser(object):
 		self.add_prod_datum('filter', data.get('filter'))
 		if data.get('query'):
 			res = data.get('query')[0]
-			if not isinstance(res, GroupQuery) or res.operation != 'union':
-				res = GroupQuery(res, 'join')
+			if not isinstance(res, algebra.Operator):
+				res = algebra.ExpressionFactory.factory('join', 'placeholder', res)
 			self.add_prod_data('_GraphPatternNotTriples_or_Filter', res)
 
 	# [21]	  TriplesBlock ::= TriplesSameSubject ( '.' TriplesBlock? )?
@@ -433,15 +380,24 @@ class Parser(object):
 	# [23]	  OptionalGraphPattern		::=		  'OPTIONAL' GroupGraphPattern		
 	def handler_optionalgraphpattern_finish(self, data):
 		if data.get('query'):
-			self.add_prod_data('query', GroupQuery(data.get('query'), 'leftjoin'))
+			expr = None
+			query = data.get('query')[0]
+			if isinstance(query, algebra.Filter):
+				expr, query = query.operands
+				self.add_prod_data('query', algebra.ExpressionFactory.factory('leftjoin', 'placeholder', query, expr))
+			else:
+				self.add_prod_data('query', algebra.ExpressionFactory.factory('leftjoin', 'placeholder', query))
 
 	# [24]	  GraphGraphPattern			::=		  'GRAPH' VarOrIRIref GroupGraphPattern
 	def handler_graphgraphpattern_finish(self, data):
 		if data.get('query'):
-			query = data.get('query')[0]
-			query.context = (data['Var'] or data['IRIref'])[-1]
-			self.add_prod_data('query', query)
-			
+			context = data.get('VarOrIRIref')[-1]
+			bgp = data.get('query')[0]
+			if context:
+				self.add_prod_data('query', ExpressionFactory.factory('graph', context, bgp))
+			else:
+				self.add_prod_data('query', bgp)
+
 	# [25]	  GroupOrUnionGraphPattern	::=		  GroupGraphPattern ( 'UNION' GroupGraphPattern )*
 	def handler_grouporuniongraphpattern_finish(self, data):
 		res = data['query'][0]
@@ -449,13 +405,14 @@ class Parser(object):
 			while len(data.get('union')) > 0:
 				lhs = res
 				rhs = data.get('union').pop(0)
-				res = GroupQuery([lhs, rhs], 'union')
+				res = algebra.ExpressionFactory.factory('union', lhs, rhs)
 						
 		self.add_prod_datum('query', res)		
 			
 	def handler__union_groupgraphpattern_star_finish(self, data):
 		if data.get('query'):
 			self.add_prod_data('union', data.get('query')[0])
+
 		if data.get('union'):
 			self.add_prod_data('union', data.get('union')[0])
 
@@ -483,7 +440,12 @@ class Parser(object):
 			self.add_prod_datum('ArgList', v)	 
 
 	# [30]	  ConstructTemplate ::=		  '{' ConstructTriples? '}'		
+	def handler_constructtemplate_start(self):
+		self.nd_var_gen = False
+
+	# [30]	  ConstructTemplate ::=		  '{' ConstructTriples? '}'		
 	def handler_constructtemplate_finish(self, data):
+		self.nd_var_gen = "0"
 		self.add_prod_datum('ConstructTemplate', data.get('pattern'))
 		self.add_prod_datum('ConstructTemplate', data.get('ConstructTemplate'))
 		
@@ -584,12 +546,11 @@ class Parser(object):
 	def handler__and_valuelogical_star_finish(self, data):
 		self.accumulate_operator_expressions('ConditionalAndExpression', '_AND', data)
 		
-	   # [50] RelationalExpression ::= NumericExpression (	
+   # [50] RelationalExpression ::= NumericExpression (	
 	def handler_relationalexpression_finish(self, data):
 		if data.get('_Compare_Numeric'):
-			if not data.get('Expression'):
-				data['Expression'] = []
-			self.add_prod_data('Expression', data.get('_Compare_Numeric')[:1] + data.get('Expression') + data.get('_Compare_Numeric')[1:])
+			data['_Compare_Numeric'] = data.get('_Compare_Numeric')[:1] + data.get('Expression') + data.get('_Compare_Numeric')[1:]
+			self.add_prod_datum('Expression', algebra.ExpressionFactory.factory(data.get('_Compare_Numeric')))
 		else:
 			self.add_prod_datum('Expression', data.get('Expression'))
 			
@@ -613,6 +574,17 @@ class Parser(object):
 		
 	# [54] UnaryExpression ::=	'!' PrimaryExpression | '+' PrimaryExpression | '-' PrimaryExpression | PrimaryExpression
 	def handler_unaryexpression_finish(self, data):
+		if data.get('UnaryExpression') == "!":
+			self.add_prod_datum('Expression', algebra.ExpressionFactory.factory("not", data.get('Expression')[0]))
+		elif data.get('UnaryExpression') == "-":
+			e = data.get('Expression')[0]
+			if isinstance(e, literal.Numeric):
+				self.add_prod_datum('Expression', -e)
+			else:
+				self.add_prod_datum('Expression', algebra.ExpressionFactory.factory('minus', e))
+		else:
+			self.add_prod_datum('Expression', data.get('Expression'))
+			
 		if data.get('UnaryExpression') in ["'","!","+","-"]:
 			self.add_prod_data('Expression', data.get('UnaryExpression') + data.get('Expression'))
 		else:
@@ -650,12 +622,12 @@ class Parser(object):
 	def handler_builtincall_finish(self, data):
 		if data.get('regex'):
 			data.get('regex').insert(0, 'regex')
-			self.add_prod_datum('BuiltInCall', [data.get('regex')])
+			self.add_prod_datum('BuiltInCall', algebra.ExpressionFactory.new(*data.get('regex')))
 		elif data.get('BOUND'):
-			data.get('Var').insert(0, 'bound')		
-			self.add_prod_datum('BuiltInCall', [data.get('Var')])
+			data.get('Var').insert(0, 'bound')
+			self.add_prod_datum('BuiltInCall', algebra.ExpressionFactory.new(*data.get('Var')))
 		elif data.get('BuiltinCall'):
-			self.add_prod_data('BuiltInCall', data.get('BuiltInCall') + data.get('Expression')) 
+			self.add_prod_data('BuiltInCall', algebra.ExpressionFactory.new(*(data.get('BuiltInCall') + data.get('Expression')))) 
 			
 	# [58]	  RegexExpression			::=		  'REGEX' '(' Expression ',' Expression ( ',' Expression )? ')'
 	def handler_regexexpression_finish(self, data):				
@@ -699,6 +671,29 @@ class Parser(object):
 	# [68]	  PrefixedName ::= PNAME_LN | PNAME_NS
 	def handler_prefixedname_finish(self, data):
 		self.add_prod_datum('iri', data.get('PrefixedName'))
+
+	def merge_modifiers(self, data):
+		if data.get('query'):
+			query = data.get('query')[0]
+		else:
+			query = Query()
+
+		if data.get('order'):
+			query = algebra.ExpressionFactory.factory('order', data.get('order')[0], query)
+		
+		if data.get('Var'):
+			query = algebra.ExpressionFactory.factory('project', data.get('Var'), query)
+			
+		if data.get('DISTINCT_REDUCED'):
+			query = algebra.ExpressionFactory.factory(data.get('DISTINCT_REDUCED')[0], query)			
+			
+		if data.get('slice'):
+			query = algebra.ExpressionFactory.factory('slice', data.get('slice')[0], data.get('slice')[1], query)
+			
+		if data.get('dataset'):
+			query = algebra.ExpressionFactory.factory('dataset', data.get('dataset'), query)
+			
+		return query
 
 	def contexts(self, production):
 		if not production:
@@ -746,19 +741,14 @@ class Parser(object):
 			data = {}
 			if context.get('start'):
 				context['start'](data)
-#			print "****"
-#			print prod
-#			print len(self.prod_data)
-#			print prod, data
 			self.prod_data.append(data)
-#			print len(self.prod_data)
 		else:
 			self.progress("%s(:start)" % prod, "")
 
 	def on_finish(self):
 		prod = self.productions.pop()
 		context = self.contexts(prod)
-		if context: 
+		if context:
 			data = self.prod_data.pop()						
 			if context.get('finish'):
 				context['finish'](data)

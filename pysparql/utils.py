@@ -9,3 +9,11 @@ def flatten(input):
 		else:
 			output.append(top)
 	return output
+	
+def to_sse(obj):
+	if hasattr(obj, 'to_sse'):
+		return obj.to_sse()
+	elif isinstance(obj, list):
+		return [to_sse(o) for o in obj]
+	else:
+		return str(obj)
