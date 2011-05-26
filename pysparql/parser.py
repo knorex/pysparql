@@ -24,6 +24,7 @@ class Parser(object):
 
 	START = "http://www.w3.org/2000/10/swap/grammar/sparql#Query"
 	GRAPH_OUTPUTS = ['query', 'distinct', 'filter', 'order', 'project', 'reduced', 'slice']
+	VAR_PREFIX = "var_"
 
 	def __init__(self, query = None, options = {}):
 		options.update({"anon_base" : "b0", "validate" : False})
@@ -32,7 +33,7 @@ class Parser(object):
 		self.options = options
 		self.productions = []
 		self.vars = {}
-		self.nd_var_gen = "0"
+		self.nd_var_gen = 0
 		if isinstance(query, list):
 			self.input = None
 			self.tokens = query
@@ -106,7 +107,6 @@ class Parser(object):
 		
 				prod_branch = BRANCHES[cur_prod]
 
-	
 				sequence = prod_branch[token.representation]
 				self.debug("parse(production)", "cur_prod %s, token %s prod_branch %s, sequence %s" % (cur_prod, token.representation, prod_branch.keys, sequence))
 				
@@ -121,7 +121,7 @@ class Parser(object):
 				term = todo_stack[-1]['terms'].pop(0)
 				self.debug("parse token(%s)" % term, self.tokens)
 				if term in [getattr(t,'representation') for t in self.tokens]:
-					token = self.accept(term)	
+					token = self.accept(term)
 					self.lineno = token.lineno
 					self.debug("parse", "term(%s): %s" % (token, term))
 					if token:
@@ -522,7 +522,7 @@ class Parser(object):
 	# [42]	  VarOrTerm ::= Var | GraphTerm		
 	def handler_varorterm_finish(self, data):
 		for v in data.values():
-			self.add_prod_datum('VarOrTerm', v)		
+			self.add_prod_datum('VarOrTerm', v)
 		
 	# [45]	  GraphTerm ::= IRIref | RDFLiteral | NumericLiteral | BooleanLiteral | BlankNode | NIL		
 	def handler_graphterm_finish(self, data):
@@ -821,7 +821,8 @@ class Parser(object):
 				elif production in ['STRING_LITERAL1', 'STRING_LITERAL2', 'STRING_LITERAL_LONG1', 'STRING_LITERAL_LONG2']:
 					self.add_prod_datum('string', token) 
 				elif production in ['VAR1', 'VAR2']:
-					self.add_prod_datum('Var', Variable(token)) 
+					new_token = self.get_gen_var(token)
+					self.add_prod_datum('Var', new_token) 
 				elif production in ['*', '/']:
 					self.add_prod_datum('MultiplicativeExpression', production) 
 				elif production in ['=', '!=', '<', '>', '<=', '>=']:
@@ -870,10 +871,21 @@ class Parser(object):
 		if not self.options.get('resolve_uris'):
 			uri._qname = "%s:%s" % (prefix,suffix)
 		return uri
+	
+	def gen_next_var(self):
+		self.nd_var_gen += 1
+		return self.VAR_PREFIX + str(self.nd_var_gen)
 		
-		
-		
-		
+	def get_gen_var(self, v):
+		if isinstance(v, str):
+			var_name = v
+		else:
+			var_name = str(v)
+
+		if not self.vars.has_key(var_name):
+			gen_v = self.gen_next_var()
+			self.vars[var_name] = gen_v
+		return Variable(self.vars[var_name])
 		
 		
 		
