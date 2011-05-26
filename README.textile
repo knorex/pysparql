@@ -18,7 +18,7 @@ h2. Examples
 >>> print p.result
 ['project', [Variable(?name)], Query(None)[['triple', Variable(?x), URI(type), URI(Person)], ['triple', Variable(?x), URI(name), Variable(?name)]]]
 </code>
-<pre>
+</pre>
 
 
 h2. Author
